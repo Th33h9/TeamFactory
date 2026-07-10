@@ -38,6 +38,21 @@ def is_test_file(path: Path, root: Path) -> bool:
     return "tests" in parts or "test" in parts or name.startswith("test_") or name.endswith("_test.py") or name == "tests.py"
 
 
+def is_test_artifact_path(path: Path, root: Path) -> bool:
+    r = path.relative_to(root)
+    for part in r.parts:
+        lowered = part.lower()
+        stem = lowered.rsplit(".", 1)[0]
+        tokens = [token for token in stem.replace("_", "-").split("-") if token]
+        if lowered in {"tests", "test", "testing", "conftest.py", "tests.py"}:
+            return True
+        if lowered.startswith("test_") or lowered.endswith("_test.py"):
+            return True
+        if any(token in {"test", "tests", "testing"} for token in tokens):
+            return True
+    return False
+
+
 def unparse(node: ast.AST | None) -> str:
     if node is None:
         return ""
@@ -173,7 +188,7 @@ def project_tree(root: Path, include_tests: bool = True) -> dict[str, Any]:
         r = path.relative_to(root)
         if any(part in IGNORED_DIRS for part in r.parts):
             continue
-        if not include_tests and is_test_file(path, root):
+        if not include_tests and is_test_artifact_path(path, root):
             continue
         try:
             stat = path.stat()

@@ -399,11 +399,12 @@ def validate_project_tree_excludes_tests(path: Path) -> None:
     body = fence.group("body")
     forbidden: list[str] = []
     patterns = [
-        r"(^|[ /│├└─])tests?/",
-        r"(^|[ /│├└─])test/",
-        r"(^|[ /│├└─])test_[^/\n]*\.py\b",
-        r"(^|[ /│├└─])[^/\n]*_test\.py\b",
-        r"(^|[ /│├└─])tests\.py\b",
+        r"(^|[ /│├└─])tests?(/|\b)",
+        r"(^|[ /│├└─])testing(/|\b)",
+        r"(^|[ /│├└─])test(/|\b)",
+        r"(^|[ /│├└─])test[^/\n]*\b",
+        r"(^|[ /│├└─])[^/\n]*(?:^|[-_.])tests?(?:[-_.]|/|\b)",
+        r"(^|[ /│├└─])[^/\n]*testing(?:[-_.]|/|\b)",
         r"(^|[ /│├└─])conftest\.py\b",
     ]
     for line in body.splitlines():

@@ -147,7 +147,8 @@ def required() -> mods.RequiredModifier:
    - The tree must use box-drawing vertical lines like `├──`, `│`, and `└──`, and must be rooted at `workspace/`, not `/workspace`.
    - Use Stage2 `implementation_tree` as the source of truth for this tree.
    - Do not include any path under `tests/` or `test/`.
-   - Do not include root-level test modules or test helpers such as `test_*.py`, `*_test.py`, `tests.py`, `conftest.py`, or fixture/support files whose purpose is only testing.
+   - Do not include root-level test modules or test helpers such as `test.py`, `test_*.py`, `*_test.py`, `tests.py`, `conftest.py`, `test.sh`, `run-tests.sh`, or fixture/support files whose purpose is only testing.
+   - Do not include test asset names such as `requirements-test.txt`, `test-requirements.txt`, `test-data/`, `manual-tests/`, `JSON-Schema-Test-Suite/`, `python-tests.yml`, `tests.rst`, or any directory/file whose path component clearly means test, tests, or testing.
    - Do not include `/tests`, `/testbed`, verifier files, reference tests, hidden tests, or any generated evaluation harness content.
    - It is acceptable to mention test-derived behavior in `Detailed Function Implementation Nodes`, but never as files in `Project Directory Structure`.
 24. Keep the tone concrete and implementation-oriented. Avoid invented product claims, broad speculation, or behavior not grounded in repo files, tests, docs, Agent1 env_spec, or Stage2 AST.
