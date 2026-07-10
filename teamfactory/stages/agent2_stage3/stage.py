@@ -608,12 +608,32 @@ class Agent2Stage3:
         remote_image_archive = f"{remote_image_root}/{instance_name}.tar"
         remote_repo_archive = f"{remote_stage3}/repo.tgz"
         remote_context = f"{remote_stage3}/image_context"
+        docker_build_command = str((agent1.get("commands") or {}).get("docker_build") or "").strip()
+        if not docker_build_command:
+            docker_build_command = ""
 
         dockerfile = dockerfile_text(base_image)
+        rebuild_base = ""
+        if docker_build_command:
+            rebuild_base = f"""
+if ! docker image inspect {q(base_image)} >/dev/null 2>&1; then
+  echo "Agent1 base image missing; rebuilding {base_image}" >&2
+  cd {q(remote_task_dir)}
+  {docker_build_command}
+fi
+"""
+        else:
+            rebuild_base = f"""
+docker image inspect {q(base_image)} >/dev/null 2>&1 || {{
+  echo "Agent1 base image missing and agent1.commands.docker_build is empty: {base_image}" >&2
+  exit 41
+}}
+"""
         script = f"""
 set -euo pipefail
 test -s {q(remote_start_md)}
 mkdir -p {q(remote_stage3)} {q(remote_context)} {q(remote_image_root)}
+{rebuild_base}
 tar --exclude=.git --exclude=__pycache__ --exclude='*.pyc' --exclude=.pytest_cache --exclude=.mypy_cache --exclude=.ruff_cache -C {q(remote_repo)} -czf {q(remote_repo_archive)} .
 cp {q(remote_start_md)} {q(remote_context)}/start.md
 cat > {q(remote_context)}/Dockerfile <<'DOCKERFILE'
