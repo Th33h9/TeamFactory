@@ -420,6 +420,67 @@ def validate_project_tree_excludes_tests(path: Path) -> None:
         )
 
 
+PROJECT_TREE_TEST_PATTERNS = [
+    r"(^|[ /│├└─])tests?(/|\b)",
+    r"(^|[ /│├└─])testing(/|\b)",
+    r"(^|[ /│├└─])test(/|\b)",
+    r"(^|[ /│├└─])test[^/\n]*\b",
+    r"(^|[ /│├└─])[^/\n]*(?:^|[-_.])tests?(?:[-_.]|/|\b)",
+    r"(^|[ /│├└─])[^/\n]*testing(?:[-_.]|/|\b)",
+    r"(^|[ /│├└─])conftest\.py\b",
+]
+
+
+def project_tree_line_depth(line: str) -> int:
+    pos = max(line.rfind("├── "), line.rfind("└── "))
+    return -1 if pos < 0 else pos // 4
+
+
+def line_is_test_project_tree_entry(line: str) -> bool:
+    normalized = line.strip()
+    return any(re.search(pattern, normalized, re.I) for pattern in PROJECT_TREE_TEST_PATTERNS)
+
+
+def scrub_project_tree_test_entries(path: Path) -> int:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    heading = re.search(r"^### Project Directory Structure\s*$", text, re.M)
+    if not heading:
+        return 0
+    after_heading = text[heading.end():]
+    next_heading = re.search(r"^##+ ", after_heading, re.M)
+    section_start = heading.end()
+    section_end = heading.end() + next_heading.start() if next_heading else len(text)
+    section = text[section_start:section_end]
+    fence = re.search(r"```(?:text|Plain|plain)?\s*\n(?P<body>.*?)```", section, re.S)
+    if not fence:
+        return 0
+
+    removed = 0
+    skip_depth: int | None = None
+    kept: list[str] = []
+    body = fence.group("body")
+    for line in body.splitlines():
+        depth = project_tree_line_depth(line)
+        if skip_depth is not None:
+            if depth > skip_depth or depth == -1:
+                removed += 1
+                continue
+            skip_depth = None
+        if line_is_test_project_tree_entry(line):
+            removed += 1
+            if line.strip().endswith("/"):
+                skip_depth = depth
+            continue
+        kept.append(line)
+    if not removed:
+        return 0
+
+    new_body = "\n".join(kept) + ("\n" if body.endswith("\n") else "")
+    new_section = section[: fence.start("body")] + new_body + section[fence.end("body"):]
+    path.write_text(text[:section_start] + new_section + text[section_end:], encoding="utf-8")
+    return removed
+
+
 class Agent2Stage3:
     name = "agent2_stage3"
 
@@ -549,6 +610,7 @@ test -s {q(remote_image_archive)}
         scp_start = scp_from_remote(args, remote_start_md, local_start)
         if scp_start.returncode != 0:
             raise RuntimeError(f"copy start.md failed: {scp_start.stdout[-4000:]}")
+        scrub_project_tree_test_entries(local_start)
         validate_project_tree_excludes_tests(local_start)
         if getattr(args, "validate_start_md", False):
             validate_nlfactory_start_md(local_start)
