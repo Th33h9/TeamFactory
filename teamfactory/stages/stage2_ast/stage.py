@@ -9,6 +9,7 @@ from teamfactory.remote import q, run_remote, scp_from_remote
 
 
 STAGE2_SCHEMA = "teamfactory.stage2_ast.v1"
+MIN_IMPLEMENTATION_PY_FILES = 5
 
 
 SCANNER_CODE = r'''
@@ -235,11 +236,18 @@ def scan(root: Path) -> dict[str, Any]:
                     public_functions.append(function_record(node, module))
                 if is_test_file(path, root) and node.name.startswith("test"):
                     test_case_count += 1
+    impl_tree = project_tree(root, include_tests=False)
+    implementation_python_files = [
+        entry["path"]
+        for entry in impl_tree["entries"]
+        if entry.get("type") == "file" and str(entry.get("path", "")).endswith(".py")
+    ]
     return {
         "schema_version": "teamfactory.stage2_ast_payload.v1",
         "repo_root": str(root),
         "project_tree": project_tree(root),
-        "implementation_tree": project_tree(root, include_tests=False),
+        "implementation_tree": impl_tree,
+        "implementation_python_files": implementation_python_files,
         "python_files": python_files,
         "public_classes": public_classes,
         "public_functions": public_functions,
@@ -251,6 +259,7 @@ def scan(root: Path) -> dict[str, Any]:
             "public_function_count": len(public_functions),
             "public_method_count": sum(len(item.get("methods", [])) for item in public_classes),
             "test_case_count": test_case_count,
+            "implementation_python_file_count": len(implementation_python_files),
             "parse_error_count": len(parse_errors),
         },
     }
@@ -302,6 +311,28 @@ test -s {q(remote_output)}
             if scp.returncode != 0:
                 raise RuntimeError(f"copy stage2 output failed: {scp.stdout[-4000:]}")
             payload = json.loads(local_payload.read_text(encoding="utf-8"))
+            implementation_py_count = int((payload.get("summary") or {}).get("implementation_python_file_count") or 0)
+            if implementation_py_count < MIN_IMPLEMENTATION_PY_FILES:
+                row = {
+                    "schema_version": STAGE2_SCHEMA,
+                    "status": "stage2_filtered",
+                    "filter_reason": "implementation_python_file_count_lt_5",
+                    "implementation_python_file_count": implementation_py_count,
+                    "min_implementation_python_files": MIN_IMPLEMENTATION_PY_FILES,
+                    "input": {
+                        "agent1_stage_path": str(item_dir(args, ref.task_id) / "agent1.json"),
+                        "agent1_status": agent1.get("status"),
+                        "remote_task_dir": remote_task_dir,
+                        "remote_repo": remote_repo,
+                        "repo_url": ref.url,
+                        "docker_image": (agent1.get("docker") or {}).get("image"),
+                    },
+                    "summary": payload.get("summary", {}),
+                    "artifact": payload,
+                }
+                write_json(item_dir(args, ref.task_id) / "stage2_ast.json", row)
+                write_stage(args, ref, self.name, row)
+                return ""
             row = {
                 "schema_version": STAGE2_SCHEMA,
                 "status": "stage2_passed",
@@ -328,6 +359,7 @@ test -s {q(remote_output)}
                     "calls": "Unique call targets observed in the AST subtree.",
                     "project_tree": "Repository file tree excluding common generated/cache directories; retained as evidence and may include tests.",
                     "implementation_tree": "Repository file tree excluding common generated/cache directories and test files/directories. Use this tree for start.md Project Directory Structure.",
+                    "implementation_python_files": "Non-test Python files in implementation_tree. Items with fewer than five are filtered before Agent2.",
                     "test_case_count": "Approximate pytest/unittest test case count from test files and test_* functions/methods.",
                 },
                 "summary": payload.get("summary", {}),
