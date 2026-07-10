@@ -385,6 +385,40 @@ def validate_nlfactory_start_md(path: Path) -> None:
         raise ValueError("start.md contains numbered node heading like '### 1.'; use '### Node N: ...'")
 
 
+def validate_project_tree_excludes_tests(path: Path) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    heading = re.search(r"^### Project Directory Structure\s*$", text, re.M)
+    if not heading:
+        return
+    after_heading = text[heading.end():]
+    next_heading = re.search(r"^##+ ", after_heading, re.M)
+    section = after_heading[: next_heading.start()] if next_heading else after_heading
+    fence = re.search(r"```(?:text|Plain|plain)?\s*\n(?P<body>.*?)```", section, re.S)
+    if not fence:
+        return
+    body = fence.group("body")
+    forbidden: list[str] = []
+    patterns = [
+        r"(^|[ /│├└─])tests?/",
+        r"(^|[ /│├└─])test/",
+        r"(^|[ /│├└─])test_[^/\n]*\.py\b",
+        r"(^|[ /│├└─])[^/\n]*_test\.py\b",
+        r"(^|[ /│├└─])tests\.py\b",
+        r"(^|[ /│├└─])conftest\.py\b",
+    ]
+    for line in body.splitlines():
+        normalized = line.strip()
+        for pattern in patterns:
+            if re.search(pattern, normalized):
+                forbidden.append(normalized)
+                break
+    if forbidden:
+        raise ValueError(
+            "start.md Project Directory Structure leaks test paths; "
+            f"remove these entries from the tree: {forbidden[:10]}"
+        )
+
+
 class Agent2Stage3:
     name = "agent2_stage3"
 
@@ -514,6 +548,7 @@ test -s {q(remote_image_archive)}
         scp_start = scp_from_remote(args, remote_start_md, local_start)
         if scp_start.returncode != 0:
             raise RuntimeError(f"copy start.md failed: {scp_start.stdout[-4000:]}")
+        validate_project_tree_excludes_tests(local_start)
         if getattr(args, "validate_start_md", False):
             validate_nlfactory_start_md(local_start)
 
@@ -605,6 +640,7 @@ test -s {q(remote_image_archive)}
             "stage2_summary": summary,
             "sample_public_classes": artifact.get("public_classes", [])[:12],
             "sample_public_functions": artifact.get("public_functions", [])[:20],
+            "implementation_tree": artifact.get("implementation_tree", {}),
             "api_budget": api_budget,
         }
         return Template(PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")).safe_substitute(

@@ -166,12 +166,14 @@ def class_record(node: ast.ClassDef, module: str) -> dict[str, Any]:
     }
 
 
-def project_tree(root: Path) -> dict[str, Any]:
+def project_tree(root: Path, include_tests: bool = True) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     truncated = False
     for path in sorted(root.rglob("*")):
         r = path.relative_to(root)
         if any(part in IGNORED_DIRS for part in r.parts):
+            continue
+        if not include_tests and is_test_file(path, root):
             continue
         try:
             stat = path.stat()
@@ -222,6 +224,7 @@ def scan(root: Path) -> dict[str, Any]:
         "schema_version": "teamfactory.stage2_ast_payload.v1",
         "repo_root": str(root),
         "project_tree": project_tree(root),
+        "implementation_tree": project_tree(root, include_tests=False),
         "python_files": python_files,
         "public_classes": public_classes,
         "public_functions": public_functions,
@@ -308,7 +311,8 @@ test -s {q(remote_output)}
                     "return_hints": "Return annotation and sampled return expressions from AST.",
                     "raises": "Raised exception expressions collected from AST Raise nodes.",
                     "calls": "Unique call targets observed in the AST subtree.",
-                    "project_tree": "Repository file tree excluding common generated/cache directories.",
+                    "project_tree": "Repository file tree excluding common generated/cache directories; retained as evidence and may include tests.",
+                    "implementation_tree": "Repository file tree excluding common generated/cache directories and test files/directories. Use this tree for start.md Project Directory Structure.",
                     "test_case_count": "Approximate pytest/unittest test case count from test files and test_* functions/methods.",
                 },
                 "summary": payload.get("summary", {}),

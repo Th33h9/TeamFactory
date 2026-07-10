@@ -38,6 +38,7 @@ Required work:
    - `## <ProjectName> Project Architecture`
    - `### Project Directory Structure`
    - a fenced `text` code block rooted at `workspace/` and using `├──`, `│`, and `└──`
+   - This directory tree must describe only the implementation workspace the agent should reconstruct. It must not include any tests, verifier files, hidden test fixtures, or test-only support files.
    - `## API Usage Guide`
    - `### Core API`
    - `#### 1. Module Import`
@@ -110,7 +111,7 @@ def required() -> mods.RequiredModifier:
    - `Value accepted by the public signature`
    - `Public method used by callers`
 14. Do not write examples that only print the function object or only prove importability. Every example must demonstrate actual behavior: input, output, state change, exception, parsing result, formatting result, or side effect.
-15. Use tests to infer behavior nodes. Do not copy test code verbatim. Convert tests into natural-language implementation contracts.
+15. Use tests to infer behavior nodes. Do not copy test code verbatim. Convert tests into natural-language implementation contracts. Tests are evidence only; they are not part of the project structure shown to the reconstruction agent.
 16. Detailed Function Implementation Nodes must be behavior-oriented, not one-to-one API listings. Each node should correspond to a coherent behavior tested by the project, such as parsing and normalization, validation and error reporting, serialization/deserialization, CLI invocation, file I/O, async behavior, decorators or plugin registration, path handling, formatting/rendering, or configuration loading.
 17. Every behavior node heading must use exactly this form:
    - `### Node 1: <behavior name>`
@@ -142,7 +143,13 @@ def required() -> mods.RequiredModifier:
    - `No Integration`
 21. Include edge cases and error cases when visible from tests or source: invalid input, empty input, missing files, malformed config, unsupported types, duplicate keys, encoding issues, async cancellation/timeouts, and platform-specific behavior.
 22. If behavior is uncertain, be conservative. Do not invent behavior unsupported by README, AST, source, or tests.
-23. Project directory tree must use box-drawing vertical lines like `├──`, `│`, and `└──`, and must be rooted at `workspace/`, not `/workspace`.
+23. Project directory tree rules:
+   - The tree must use box-drawing vertical lines like `├──`, `│`, and `└──`, and must be rooted at `workspace/`, not `/workspace`.
+   - Use Stage2 `implementation_tree` as the source of truth for this tree.
+   - Do not include any path under `tests/` or `test/`.
+   - Do not include root-level test modules or test helpers such as `test_*.py`, `*_test.py`, `tests.py`, `conftest.py`, or fixture/support files whose purpose is only testing.
+   - Do not include `/tests`, `/testbed`, verifier files, reference tests, hidden tests, or any generated evaluation harness content.
+   - It is acceptable to mention test-derived behavior in `Detailed Function Implementation Nodes`, but never as files in `Project Directory Structure`.
 24. Keep the tone concrete and implementation-oriented. Avoid invented product claims, broad speculation, or behavior not grounded in repo files, tests, docs, Agent1 env_spec, or Stage2 AST.
 25. The document must be self-contained enough for reconstructing the whole project in `/workspace`, but it must not copy full source implementation bodies.
 26. Mention dependency/runtime facts only when they are visible from project files, Agent1 env_spec, or test/oracle commands.
