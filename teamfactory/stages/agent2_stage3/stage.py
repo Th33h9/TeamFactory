@@ -429,6 +429,7 @@ PROJECT_TREE_TEST_PATTERNS = [
     r"(^|[ /│├└─])[^/\n]*testing(?:[-_.]|/|\b)",
     r"(^|[ /│├└─])conftest\.py\b",
 ]
+MIN_PROJECT_TREE_PY_FILES = 5
 
 
 def project_tree_line_depth(line: str) -> int:
@@ -479,6 +480,31 @@ def scrub_project_tree_test_entries(path: Path) -> int:
     new_section = section[: fence.start("body")] + new_body + section[fence.end("body"):]
     path.write_text(text[:section_start] + new_section + text[section_end:], encoding="utf-8")
     return removed
+
+
+def project_tree_body(path: Path) -> str:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    heading = re.search(r"^### Project Directory Structure\s*$", text, re.M)
+    if not heading:
+        return ""
+    after_heading = text[heading.end():]
+    next_heading = re.search(r"^##+ ", after_heading, re.M)
+    section = after_heading[: next_heading.start()] if next_heading else after_heading
+    fence = re.search(r"```(?:text|Plain|plain)?\s*\n(?P<body>.*?)```", section, re.S)
+    return fence.group("body") if fence else section
+
+
+def count_project_tree_python_files(path: Path) -> int:
+    return sum(1 for line in project_tree_body(path).splitlines() if re.search(r"\.py\b", line))
+
+
+def validate_project_tree_python_file_count(path: Path) -> None:
+    count = count_project_tree_python_files(path)
+    if count < MIN_PROJECT_TREE_PY_FILES:
+        raise ValueError(
+            "start.md Project Directory Structure has too few Python files; "
+            f"found {count}, expected at least {MIN_PROJECT_TREE_PY_FILES}"
+        )
 
 
 class Agent2Stage3:
@@ -612,6 +638,7 @@ test -s {q(remote_image_archive)}
             raise RuntimeError(f"copy start.md failed: {scp_start.stdout[-4000:]}")
         scrub_project_tree_test_entries(local_start)
         validate_project_tree_excludes_tests(local_start)
+        validate_project_tree_python_file_count(local_start)
         if getattr(args, "validate_start_md", False):
             validate_nlfactory_start_md(local_start)
 
