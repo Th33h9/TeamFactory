@@ -1,0 +1,11 @@
+{
+  "final_count": 1000,
+  "strict_available": 816,
+  "relaxed_available": 1006,
+  "strict_used": 816,
+  "relaxed_used": 184,
+  "supplement_skipped_by_meta_filter": 27,
+  "jsonl": "/volume/pt-coder/users/kka/repo_candidates/github_nl2repo_like_web_static_final_1000.jsonl",
+  "txt": "/volume/pt-coder/users/kka/repo_candidates/github_nl2repo_like_web_static_final_1000.txt",
+  "md": "/volume/pt-coder/users/kka/repo_candidates/github_nl2repo_like_web_static_final_1000.md"
+}
