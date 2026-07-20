@@ -43,6 +43,14 @@ def final_text_from_stdout(stdout: str) -> tuple[str, list[dict[str, Any]]]:
     return ("\n".join(final_parts).strip() if final_parts else stdout.strip()), events
 
 
+def model_for_phase(args: Any, phase: str) -> str:
+    if phase == "agent1":
+        return str(getattr(args, "agent1_model", "") or getattr(args, "model", "")).strip()
+    if phase == "agent2_stage3":
+        return str(getattr(args, "agent2_model", "") or getattr(args, "model", "")).strip()
+    return str(getattr(args, "model", "")).strip()
+
+
 class RemoteClaudeCodeProvider:
     def __init__(self, args: Any) -> None:
         self.args = args
@@ -57,6 +65,9 @@ class RemoteClaudeCodeProvider:
         api_base = strip_v1(str(self.args.api_base))
         token = self.sidecar_token()
         claude_bin = str(self.args.claude_bin)
+        model = model_for_phase(self.args, phase)
+        if not model:
+            raise RuntimeError(f"missing model for phase {phase!r}")
         cmd = [
             q(claude_bin),
             "--print",
@@ -69,7 +80,7 @@ class RemoteClaudeCodeProvider:
             "--tools",
             q("Bash,Read,Write"),
             "--model",
-            q(self.args.model),
+            q(model),
             "--input-format",
             "text",
             "--output-format",
@@ -85,11 +96,11 @@ cd {q(cwd)}
 export ANTHROPIC_BASE_URL={q(api_base)}
 export ANTHROPIC_API_KEY={q(token)}
 export ANTHROPIC_AUTH_TOKEN={q(token)}
-export ANTHROPIC_DEFAULT_OPUS_MODEL={q(self.args.model)}
-export ANTHROPIC_DEFAULT_SONNET_MODEL={q(self.args.model)}
-export ANTHROPIC_DEFAULT_HAIKU_MODEL={q(self.args.model)}
-export ANTHROPIC_CUSTOM_MODEL_OPTION={q(self.args.model)}
-export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME={q(f"{self.args.model} via sidecar")}
+export ANTHROPIC_DEFAULT_OPUS_MODEL={q(model)}
+export ANTHROPIC_DEFAULT_SONNET_MODEL={q(model)}
+export ANTHROPIC_DEFAULT_HAIKU_MODEL={q(model)}
+export ANTHROPIC_CUSTOM_MODEL_OPTION={q(model)}
+export ANTHROPIC_CUSTOM_MODEL_OPTION_NAME={q(f"{model} via sidecar")}
 export CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
 export API_TIMEOUT_MS={q(str(self.args.claude_api_timeout_ms))}
 export CLAUDE_CODE_MAX_RETRIES={q(str(self.args.claude_max_retries))}
@@ -105,7 +116,7 @@ export IS_SANDBOX=1
                 "record_type": "remote_claude_started",
                 "phase": phase,
                 "task_id": task_id,
-                "model": self.args.model,
+                "model": model,
                 "cwd": cwd,
                 "remote_host": self.args.remote_host,
                 "claude_bin": claude_bin,
@@ -138,7 +149,7 @@ export IS_SANDBOX=1
             "record_type": "remote_claude_summary",
             "phase": phase,
             "task_id": task_id,
-            "model": self.args.model,
+            "model": model,
             "cwd": cwd,
             "status": "completed" if proc.returncode == 0 else "failed",
             "returncode": proc.returncode,

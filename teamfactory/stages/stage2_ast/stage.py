@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from teamfactory.artifacts import ItemRef, item_dir, read_stage, write_json, write_stage
@@ -52,6 +51,90 @@ def is_test_artifact_path(path: Path, root: Path) -> bool:
         if any(token in {"test", "tests", "testing"} for token in tokens):
             return True
     return False
+
+
+def module_name_for(path: Path, root: Path) -> str:
+    r = path.relative_to(root)
+    if r.name == "__init__.py":
+        return r.parent.as_posix().replace("/", ".")
+    return r.with_suffix("").as_posix().replace("/", ".")
+
+
+def project_module_inventory(root: Path) -> dict[str, Any]:
+    modules: set[str] = set()
+    roots: set[str] = set()
+    for path in sorted(root.rglob("*.py")):
+        r = path.relative_to(root)
+        if any(part in IGNORED_DIRS for part in r.parts):
+            continue
+        if is_test_artifact_path(path, root):
+            continue
+        module = module_name_for(path, root)
+        if not module or module == "__init__":
+            continue
+        modules.add(module)
+        roots.add(module.split(".", 1)[0])
+    return {
+        "modules": sorted(modules),
+        "roots": sorted(roots),
+    }
+
+
+def is_repo_module(module: str, module_names: set[str], module_roots: set[str]) -> bool:
+    if not module:
+        return False
+    root = module.split(".", 1)[0]
+    return module in module_names or root in module_roots
+
+
+def imported_repo_symbols(tree: ast.AST, test_path: str, module_names: set[str], module_roots: set[str]) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module = alias.name
+                if not is_repo_module(module, module_names, module_roots):
+                    continue
+                symbol = module
+                key = ("import", symbol, test_path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append({
+                    "symbol": symbol,
+                    "module": module,
+                    "name": "",
+                    "import_type": "import",
+                    "test_path": test_path,
+                    "lineno": node.lineno,
+                    "statement": f"import {module}",
+                })
+        elif isinstance(node, ast.ImportFrom):
+            module = "." * int(node.level or 0) + (node.module or "")
+            if node.level:
+                # Relative imports inside tests are often test helpers. Keep only
+                # absolute project imports so the gate checks public repo surface.
+                continue
+            if not is_repo_module(module, module_names, module_roots):
+                continue
+            for alias in node.names:
+                name = alias.name
+                symbol = f"{module}.{name}" if name != "*" else f"{module}.*"
+                key = ("from", symbol, test_path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append({
+                    "symbol": symbol,
+                    "module": module,
+                    "name": name,
+                    "import_type": "from",
+                    "test_path": test_path,
+                    "lineno": node.lineno,
+                    "statement": f"from {module} import {name}",
+                })
+    return found
 
 
 def unparse(node: ast.AST | None) -> str:
@@ -210,19 +293,27 @@ def scan(root: Path) -> dict[str, Any]:
     public_classes: list[dict[str, Any]] = []
     public_functions: list[dict[str, Any]] = []
     python_files: list[str] = []
+    test_imported_symbols: list[dict[str, Any]] = []
     test_case_count = 0
     parse_errors: list[dict[str, str]] = []
+    module_inventory = project_module_inventory(root)
+    module_names = set(module_inventory["modules"])
+    module_roots = set(module_inventory["roots"])
     for path in sorted(root.rglob("*.py")):
         r = path.relative_to(root)
         if any(part in IGNORED_DIRS for part in r.parts):
             continue
-        module = r.with_suffix("").as_posix().replace("/", ".")
+        module = module_name_for(path, root)
         python_files.append(r.as_posix())
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=str(path))
         except SyntaxError as exc:
             parse_errors.append({"path": r.as_posix(), "error": str(exc)})
             continue
+        if is_test_file(path, root):
+            test_imported_symbols.extend(
+                imported_repo_symbols(tree, r.as_posix(), module_names, module_roots)
+            )
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 if not node.name.startswith("_"):
@@ -242,15 +333,20 @@ def scan(root: Path) -> dict[str, Any]:
         for entry in impl_tree["entries"]
         if entry.get("type") == "file" and str(entry.get("path", "")).endswith(".py")
     ]
+    required_api_symbols = sorted({item["symbol"] for item in test_imported_symbols})
     return {
         "schema_version": "teamfactory.stage2_ast_payload.v1",
         "repo_root": str(root),
+        "project_import_roots": module_inventory["roots"],
+        "project_modules": module_inventory["modules"],
         "project_tree": project_tree(root),
         "implementation_tree": impl_tree,
         "implementation_python_files": implementation_python_files,
         "python_files": python_files,
         "public_classes": public_classes,
         "public_functions": public_functions,
+        "test_imported_repo_symbols": test_imported_symbols,
+        "required_api_symbols": required_api_symbols,
         "test_case_count": test_case_count,
         "parse_errors": parse_errors,
         "summary": {
@@ -258,6 +354,7 @@ def scan(root: Path) -> dict[str, Any]:
             "public_class_count": len(public_classes),
             "public_function_count": len(public_functions),
             "public_method_count": sum(len(item.get("methods", [])) for item in public_classes),
+            "test_imported_repo_symbol_count": len(required_api_symbols),
             "test_case_count": test_case_count,
             "implementation_python_file_count": len(implementation_python_files),
             "parse_error_count": len(parse_errors),
@@ -360,6 +457,8 @@ test -s {q(remote_output)}
                     "project_tree": "Repository file tree excluding common generated/cache directories; retained as evidence and may include tests.",
                     "implementation_tree": "Repository file tree excluding common generated/cache directories and test files/directories. Use this tree for start.md Project Directory Structure.",
                     "implementation_python_files": "Non-test Python files in implementation_tree. Items with fewer than five are filtered before Agent2.",
+                    "test_imported_repo_symbols": "Repo modules/classes/functions imported by test files; Agent2 must cover these in start.md/API manifest.",
+                    "required_api_symbols": "Unique symbol strings derived from test_imported_repo_symbols for the hard API coverage gate.",
                     "test_case_count": "Approximate pytest/unittest test case count from test files and test_* functions/methods.",
                 },
                 "summary": payload.get("summary", {}),

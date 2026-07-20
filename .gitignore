@@ -20,8 +20,15 @@ teamfactory_agent1_trajectory.jsonl
 
 .env
 .env.*
+.secrets/
 *.key
 *.pem
 *.token
+
+*_trajectory.jsonl
+repo_candidates/*.json
+repo_candidates/*.jsonl
+repo_candidates/*.txt
+noneditable_sitepackages_leak_delete_manifest_*.json
 
 .DS_Store

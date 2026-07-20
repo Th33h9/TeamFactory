@@ -1,0 +1,1 @@
+"""TeamFactory tests."""

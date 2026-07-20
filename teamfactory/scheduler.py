@@ -14,6 +14,7 @@ from teamfactory.repo_source import read_repo_jsonl, task_id_for_url
 from teamfactory.remote import prepare_sshpass
 from teamfactory.stages.agent1 import Agent1Stage
 from teamfactory.stages.agent2_stage3 import Agent2Stage3
+from teamfactory.stages.oracle_gate import OracleRepairGateStage
 from teamfactory.stages.stage2_ast import Stage2AstStage
 
 
@@ -21,6 +22,7 @@ STAGE_OBJECTS = {
     "agent1": Agent1Stage(),
     "stage2_ast": Stage2AstStage(),
     "agent2_stage3": Agent2Stage3(),
+    "oracle_repair": OracleRepairGateStage(),
 }
 FIRST_STAGE = "agent1"
 
@@ -48,18 +50,33 @@ class StreamingPipeline:
 
     def load_items(self) -> list[ItemRef]:
         records = read_repo_jsonl(self.args.repo_jsonl)
-        if self.args.start_index:
-            records = records[self.args.start_index :]
+        start_index = int(getattr(self.args, "start_index", 0) or 0)
+        end_index = int(getattr(self.args, "end_index", 0) or 0)
+        if end_index <= 0 or end_index > len(records):
+            end_index = len(records)
+        if start_index > end_index:
+            records = []
+        else:
+            records = records[start_index:end_index]
+        indexed_records = list(enumerate(records, start=start_index))
+        if getattr(self.args, "reverse", False):
+            indexed_records.reverse()
         if self.args.limit > 0:
-            records = records[: self.args.limit]
+            indexed_records = indexed_records[: self.args.limit]
         items: list[ItemRef] = []
-        for offset, record in enumerate(records):
+        suffix = str(getattr(self.args, "task_id_suffix", "") or "").strip()
+        for index, record in indexed_records:
             url = str(record["url"])
+            task_id = task_id_for_url(url)
+            if suffix:
+                clean_suffix = suffix.strip("-_")
+                if clean_suffix:
+                    task_id = f"{task_id}-{clean_suffix}"
             items.append(
                 ItemRef(
-                    index=self.args.start_index + offset,
+                    index=index,
                     url=url,
-                    task_id=task_id_for_url(url),
+                    task_id=task_id,
                     lane=-1,
                 )
             )
@@ -204,6 +221,8 @@ class StreamingPipeline:
             return int(self.args.agent1_concurrency)
         if stage == "agent2_stage3":
             return int(self.args.agent2_concurrency)
+        if stage == "oracle_repair":
+            return int(self.args.oracle_concurrency)
         return 0
 
     def queue_snapshot(self) -> dict[str, Any]:

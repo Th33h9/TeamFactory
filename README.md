@@ -13,6 +13,9 @@ Current scope:
   use a model.
 - Agent2/Stage3: generate an NLFactory/NL2RepoBench-style `start.md`, then
   materialize a Harbor-format instance and save the final Docker image tar.
+- Oracle repair gate: run the canonical Harbor oracle after materialization;
+  diagnose failures, route them to the owning generation stage, apply a
+  transactional instance repair, and require a passing recheck.
 
 ## Pipeline
 
@@ -25,13 +28,17 @@ repo jsonl
   -> Agent2 reads repo + AST inventory and writes environment/start.md
   -> materializer writes Harbor files locally
   -> materializer builds the final remote Docker image and saves <task_id>.tar
+  -> canonical Harbor oracle probe
+  -> failing instances are repaired for agent1, stage2_ast, or agent2_stage3
+  -> transactional oracle recheck
 ```
 
-The two model-backed stages keep their prompts in stage folders:
+The model-backed generation and repair stages keep their prompts in stage folders:
 
 ```text
 teamfactory/stages/agent1/prompt.md
 teamfactory/stages/agent2_stage3/prompt.md
+teamfactory/stages/oracle_repair/prompt.md
 ```
 
 `Agent2` is prompted to produce `start.md` in NLFactory/NL2RepoBench style:
@@ -58,8 +65,12 @@ are controlled by:
 
 - `--agent1-concurrency`
 - `--agent2-concurrency`
+- `--oracle-concurrency`
 
 Stage2 has no model call and currently has no explicit global concurrency cap.
+The oracle repair gate is enabled by default. `--skip-oracle-repair` is intended
+only for generation debugging; `--oracle-max-repair-rounds` bounds the repair
+loop.
 
 ## Quick Run
 
@@ -75,11 +86,19 @@ TEAMFACTORY_API_KEY='YOUR_KEY' \
   --concurrency 4 \
   --agent1-concurrency 4 \
   --agent2-concurrency 4 \
+  --oracle-concurrency 4 \
   --dataset-root /volume/pt-coder/users/kka/harbor/datasets/TeamFactory \
   --remote-work-root /tmp/kka_TeamFactory_smoke_stage3_tp4pp4 \
   --remote-image-root /shared/users/kka/TeamFactory_images \
-  --model gpt-5.4-ppio
+  --agent1-model gpt-5.4-ppio \
+  --agent2-model gpt-5.4-ppio \
+  --oracle-repair-model claude-sonnet-4-6-ppio
 ```
+
+All three stages share `TEAMFACTORY_API_KEY`, while their models are selected
+independently. The legacy `--model NAME` option remains available and overrides
+both `--agent1-model` and `--agent2-model`; it does not override the oracle
+repair model.
 
 Useful defaults:
 
@@ -168,4 +187,25 @@ Agent2/Stage3 output is `agent2_stage3.json`. It records whether `start.md` was
 generated and whether Harbor materialization plus image archive creation
 succeeded.
 
+The post-Stage3 oracle gate writes `oracle_repair.json`. A clean canonical run
+records `oracle_passed`; an accepted transactional repair records
+`oracle_repaired` together with the responsible generation stage and the
+standalone oracle-repair run directory. Other terminal states fail the item.
+
 See `流程原理.md` for the Chinese explanation of the pipeline.
+
+## Instance Tuning Pipeline
+
+`teamfactory/stages/instance_tuning/` uses two independent streaming pools. The
+16-worker Agent1 pool runs real Harbor solutions with Claude Code and
+`claude-sonnet-4-6-ppio`; zero/no-reward results flow into a separate
+16-worker Agent2 pool using Claude Code and `claude-opus-4-8-ppio` for combined
+diagnosis and evidence-backed repair. Mechanical image build/recheck work is
+separated from both model pools. Repairs are transactional, preserve the
+existing `start.md` document format, reject test weakening and answer leakage,
+and are retained only after a score-improving recheck. See
+`teamfactory/stages/instance_tuning/README.md` and run with:
+
+```bash
+ANTHROPIC_AUTH_TOKEN='...' ./scripts/run_instance_tuning.sh
+```
